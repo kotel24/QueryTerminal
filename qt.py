@@ -8,7 +8,7 @@ import time
 from dataclasses import dataclass
 from typing import List, Tuple, Optional, Callable
 
-# ───────────────────────── constants ───────────────────────── #
+# ───────── constants ───────── #
 
 BANNER = "Query Terminal (SQLite). Type .help"
 HELP = """\
@@ -25,8 +25,9 @@ SQL:
 """
 
 HISTFILE = os.path.expanduser("~/.qt_history")
-HISTLEN = 1000
-# ─────────────────────── utilities (format) ────────────────── #
+HISTLEN = 2000
+
+# ───────── formatting ───────── #
 
 def _format_table(headers: List[str], rows: List[Tuple]) -> str:
     if not headers:
@@ -35,36 +36,32 @@ def _format_table(headers: List[str], rows: List[Tuple]) -> str:
     for r in rows:
         for i, v in enumerate(r):
             widths[i] = max(widths[i], len("" if v is None else str(v)))
-
     def fmt_row(row: Tuple | List) -> str:
         return " | ".join(str("" if v is None else v).ljust(widths[i])
                           for i, v in enumerate(row))
-
     sep = "-+-".join("-" * w for w in widths)
     out: List[str] = [fmt_row(headers), sep]
     out.extend(fmt_row(r) for r in rows)
     return "\n".join(out)
 
-
 def _print_table(headers: List[str], rows: List[Tuple]) -> None:
     if not headers:
-        print("(no columns)")
-        return
+        print("(no columns)"); return
     print(_format_table(headers, rows))
     if not rows:
         print("(empty)")
 
-# ────────────────────────── state ──────────────────────────── #
+# ───────── state ───────── #
 
 @dataclass
 class Runtime:
     conn: sqlite3.Connection
     path: str
 
-# ──────────────────────── main app ─────────────────────────── #
+# ───────── app ───────── #
 
 class QT:
-    """SQLite console client with meta-commands, history, and auto-complete (Unix/macOS)."""
+    """SQLite console client with meta-commands, history, and auto-complete (macOS/Unix)."""
 
     def __init__(self, path: str = ":memory:") -> None:
         self.rt = self._open(path)
@@ -77,12 +74,10 @@ class QT:
             ".schema": self._m_schema,
             ".dump": self._m_dump,
         }
-        # runtime toggles
         self._timer = False
-        # readline related (set in _setup_readline if available)
-        self._readline = None
+        self._readline = None  # set in _setup_readline()
 
-    # ─────────────── I/O & readline ─────────────── #
+    # ── I/O & readline ── #
 
     def _prompt(self) -> str:
         name = os.path.basename(self.rt.path)
@@ -97,47 +92,53 @@ class QT:
             return None  # unreachable
 
     def _setup_readline(self) -> None:
-        """Enable history and tab-completion on Unix/macOS using readline."""
+        """Enable history + bash-like keybindings + completion on macOS/Unix."""
         try:
-            import readline  # type: ignore[attr-defined]
+            import readline  # builtin on macOS
         except Exception:
-            # Windows / environments without readline: silently skip
+            self._readline = None
             return
 
         self._readline = readline
 
-        # history
+        # history persistence
         try:
             readline.read_history_file(HISTFILE)
         except FileNotFoundError:
             pass
         readline.set_history_length(HISTLEN)
 
-        # word breaks: keep dots so we can complete table.column
+        # treat '.' and '_' as word chars (table.column, snake_case)
         try:
             delims = readline.get_completer_delims()
-            # remove '.' and '_' from delimiters to allow completion over them
             for ch in "._":
                 delims = delims.replace(ch, "")
             readline.set_completer_delims(delims)
         except Exception:
             pass
 
-        # main completer
+        # bash-like keybindings
+        try:
+            readline.parse_and_bind("set editing-mode emacs")
+            readline.parse_and_bind("tab: complete")
+            readline.parse_and_bind('"\\e[A": history-search-backward')  # Up
+            readline.parse_and_bind('"\\e[B": history-search-forward')   # Down
+            readline.parse_and_bind('"\\C-a": beginning-of-line')
+            readline.parse_and_bind('"\\C-e": end-of-line')
+            readline.parse_and_bind('"\\C-k": kill-line')
+            readline.parse_and_bind('"\\C-u": unix-line-discard')
+            readline.parse_and_bind('"\\C-r": reverse-search-history')
+            readline.parse_and_bind('"\\C-l": clear-screen')
+        except Exception:
+            pass
+
+        # completer
         def completer(text: str, state: int) -> Optional[str]:
             try:
                 return self._complete(text, state)
             except Exception:
-                # never crash on completion
                 return None
-
         readline.set_completer(completer)
-        # bind Tab to completion
-        try:
-            readline.parse_and_bind("tab: complete")
-            readline.parse_and_bind("set editing-mode emacs")
-        except Exception:
-            pass
 
     def _save_history(self) -> None:
         if not self._readline:
@@ -147,7 +148,7 @@ class QT:
         except Exception:
             pass
 
-    # ─────────── completion helpers ─────────── #
+    # ── completion helpers ── #
 
     def _list_tables(self) -> List[str]:
         q = ("SELECT name FROM sqlite_master "
@@ -155,12 +156,10 @@ class QT:
         return [r[0] for r in self.rt.conn.execute(q)]
 
     def _list_columns(self, table: str) -> List[str]:
-        # pragma table_info is safe; we quote the table name for info schema
         try:
-            # use quoted identifier to tolerate weird names
             quoted = '"' + table.replace('"', '""') + '"'
             cur = self.rt.conn.execute(f"PRAGMA table_info({quoted})")
-            return [row[1] for row in cur.fetchall()]  # name in col #1
+            return [row[1] for row in cur.fetchall()]
         except sqlite3.Error:
             return []
 
@@ -168,78 +167,55 @@ class QT:
         cols: List[str] = []
         for t in self._list_tables():
             cols.extend(self._list_columns(t))
-        # unique preserve order
-        seen = set()
-        uniq = []
+        seen = set(); uniq = []
         for c in cols:
             if c not in seen:
-                seen.add(c)
-                uniq.append(c)
+                seen.add(c); uniq.append(c)
         return uniq
 
     def _complete(self, text: str, state: int) -> Optional[str]:
-        """Return nth (state) completion for given text using current line context."""
         import re
         rl = self._readline
         if rl is None:
             return None
-
         buffer = rl.get_line_buffer()
         beg = rl.get_begidx()
-        # text to complete is buffer[beg:]; we need context up to beg
-        before = buffer[:beg]
+        before = buffer[:beg].strip()
 
-        # Meta command completion
-        if before.strip().startswith("."):
-            tokens = before.strip().split()
+        # meta-commands
+        if before.startswith("."):
+            tokens = before.split()
             if len(tokens) <= 1:
-                # completing the meta command itself
-                candidates = sorted([m for m in self._meta.keys() if m.startswith(text or "")])
+                candidates = sorted([m for m in self._meta if m.startswith(text or "")])
             else:
-                # completing argument of a meta command
                 cmd = tokens[0]
                 if cmd in (".tables", ".schema"):
-                    # suggest table/view names
                     candidates = [n for n in self._list_tables() if n.startswith(text or "")]
                 else:
                     candidates = []
         else:
-            # SQL completion: naive context heuristic
-            # tokenise up to 'beg'
+            # SQL heuristics
             toks = re.findall(r"[A-Za-z_][A-Za-z0-9_]*|[.,()]|<=|>=|<>|!=|=|\\*|;", before, re.IGNORECASE)
             toks = [t for t in toks if t != ";"]
-
             upper_tokens = [t.upper() for t in toks if re.match(r"[A-Za-z_]", t)]
-            want_table = False
-            want_column = False
-
-            # if last SQL keyword among these appears near end, decide context
+            want_table = want_column = False
             KEY_TABLE = {"FROM", "JOIN", "UPDATE", "INTO", "TABLE"}
             KEY_COLUMN = {"SELECT", "WHERE", "ON", "GROUP", "ORDER", "HAVING", "SET"}
-
-            # look from end for a signal
             for i in range(len(upper_tokens) - 1, -1, -1):
                 tok = upper_tokens[i]
-                if tok in KEY_TABLE:
-                    want_table = True
-                    break
-                if tok in KEY_COLUMN:
-                    want_column = True
-                    break
+                if tok in KEY_TABLE: want_table = True; break
+                if tok in KEY_COLUMN: want_column = True; break
 
-            # special case: "table." -> complete columns of that table
             m = re.search(r'([A-Za-z_][A-Za-z0-9_]*)\.$', before)
             if m:
                 tname = m.group(1)
                 cols = self._list_columns(tname)
-                candidates = [f"{c}" for c in cols if c.startswith(text or "")]
+                candidates = [c for c in cols if c.startswith(text or "")]
             elif want_table:
                 candidates = [n for n in self._list_tables() if n.startswith(text or "")]
             elif want_column:
-                # complete columns from all tables
                 candidates = [c for c in self._all_columns() if c.startswith(text or "")]
             else:
-                # default: offer both tables and common SQL keywords
                 KW = [
                     "SELECT", "FROM", "WHERE", "JOIN", "LEFT", "RIGHT", "INNER", "OUTER",
                     "GROUP", "BY", "ORDER", "HAVING", "LIMIT", "INSERT", "INTO", "VALUES",
@@ -247,11 +223,10 @@ class QT:
                 ]
                 candidates = [k for k in KW if k.startswith((text or "").upper())]
                 candidates += [n for n in self._list_tables() if n.startswith(text or "")]
-
         candidates = sorted(set(candidates))
         return candidates[state] if state < len(candidates) else None
 
-    # ─────────── meta-commands ─────────── #
+    # ── meta-commands ── #
 
     def _m_help(self, _: List[str]) -> None:
         print(HELP)
@@ -261,92 +236,69 @@ class QT:
             self._save_history()
             self.rt.conn.close()
         finally:
-            print("Bye.")
-            sys.exit(0)
+            print("Bye."); sys.exit(0)
 
     def _m_open(self, args: List[str]) -> None:
         if not args:
-            print("Usage: .open <path>")
-            return
+            print("Usage: .open <path>"); return
         self.rt = self._open(args[0])
         print(f"Opened {self.rt.path}")
 
     def _m_tables(self, args: List[str]) -> None:
-        """
-        .tables            -> list table/view names
-        .tables <name>     -> print contents of the given table/view
-        """
+        """ .tables -> list names; .tables <name> -> print contents """
         try:
             if not args:
                 names = self._list_tables()
                 print(" ".join(names) if names else "(no tables)")
                 return
-
             name = args[0]
             exists = self.rt.conn.execute(
                 "SELECT 1 FROM sqlite_master WHERE type IN ('table','view') AND name = ?",
                 (name,)
             ).fetchone()
             if not exists:
-                print(f"(no such table or view: {name})")
-                return
-
+                print(f"(no such table or view: {name})"); return
             quoted = '"' + name.replace('"', '""') + '"'
             cur = self.rt.conn.execute(f"SELECT * FROM {quoted}")
             headers = [d[0] for d in cur.description]
             rows = cur.fetchall()
             _print_table(headers, rows)
-
         except sqlite3.Error as e:
             print(f"SQL error: {e}")
 
     def _m_schema(self, args: List[str]) -> None:
-        """
-        .schema           -> print CREATE statements for all user objects
-        .schema <name>    -> print CREATE statement for a specific object
-        """
+        """ .schema -> all schema; .schema <name> -> specific object """
         try:
             if not args:
-                query = (
-                    "SELECT name, sql FROM sqlite_master "
-                    "WHERE type IN ('table','view','index','trigger') "
-                    "AND name NOT LIKE 'sqlite_%' ORDER BY type, name"
-                )
-                cur = self.rt.conn.execute(query)
-                rows = cur.fetchall()
+                q = ("SELECT name, sql FROM sqlite_master "
+                     "WHERE type IN ('table','view','index','trigger') "
+                     "AND name NOT LIKE 'sqlite_%' ORDER BY type, name")
+                rows = self.rt.conn.execute(q).fetchall()
                 if not rows:
-                    print("(empty schema)")
-                    return
+                    print("(empty schema)"); return
                 for name, sql in rows:
                     print(f"-- {name}")
                     print((sql or "(no schema)").strip() + ";\n")
                 return
-
             name = args[0]
-            cur = self.rt.conn.execute(
-                "SELECT sql FROM sqlite_master "
-                "WHERE name = ? AND type IN ('table','view','index','trigger')",
-                (name,)
-            )
-            rows = cur.fetchall()
+            q = ("SELECT sql FROM sqlite_master "
+                 "WHERE name = ? AND type IN ('table','view','index','trigger')")
+            rows = self.rt.conn.execute(q, (name,)).fetchall()
             if not rows:
-                print(f"(no such object: {name})")
-                return
+                print(f"(no such object: {name})"); return
             for (sql,) in rows:
                 print((sql or "(no schema)").strip() + ";")
-
         except sqlite3.Error as e:
             print(f"SQL error: {e}")
 
     def _m_dump(self, _: List[str]) -> None:
-        """Dump the whole database as SQL text."""
         try:
             for line in self.rt.conn.iterdump():
                 print(line)
         except sqlite3.Error as e:
             print(f"SQL error: {e}")
 
-    # ─────────── SQL execution ─────────── #
+    # ── SQL exec ── #
 
     def _exec_sql(self, sql: str) -> None:
         start = time.perf_counter()
@@ -359,17 +311,15 @@ class QT:
                 rows = cur.fetchall()
                 _print_table(headers, rows)
         except sqlite3.Error as e:
-            try:
-                self.rt.conn.rollback()
-            except sqlite3.Error:
-                pass
+            try: self.rt.conn.rollback()
+            except sqlite3.Error: pass
             print(f"SQL error: {e}")
         finally:
             if self._timer:
                 ms = (time.perf_counter() - start) * 1000
                 print(f"(Time: {ms:.2f} ms)")
 
-    # ─────────── lifecycle ─────────── #
+    # ── lifecycle ── #
 
     def _open(self, path: str) -> Runtime:
         if path != ":memory:":
@@ -398,20 +348,28 @@ class QT:
                 break
             if not line:
                 continue
+
+            # meta
             if not self._buffer and line.startswith("."):
                 if not self._handle_meta(line):
                     print("Unknown command. Type .help")
-                # refresh history after meta input
+                if self._readline and line:
+                    self._readline.add_history(line)
                 self._save_history()
                 continue
+
+            # multiline SQL
             self._buffer.append(line)
             if line.endswith(";"):
-                sql = "\n".join(self._buffer)
+                sql = "\n".join(self._buffer).strip()
                 self._buffer.clear()
                 self._exec_sql(sql)
+                if self._readline and sql:
+                    # store completed SQL as single history entry (flattened)
+                    self._readline.add_history(sql.replace("\n", " "))
                 self._save_history()
 
-# ───────────────────────── entrypoint ──────────────────────── #
+# ───────── entrypoint ───────── #
 
 def main() -> None:
     path = sys.argv[1] if len(sys.argv) > 1 else ":memory:"
