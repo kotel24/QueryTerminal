@@ -1,0 +1,91 @@
+\documentclass[a4paper,14pt]{extarticle} % 14 шрифт по ГОСТ
+
+% --- Поддержка русского языка и шрифтов ---
+\usepackage{fontspec}
+\setmainfont{Times New Roman} % Шрифт текста
+\setmonofont{Courier New}     % Шрифт кода
+\usepackage{polyglossia}
+\setdefaultlanguage{russian}
+
+% --- Поля страницы по ГОСТ ---
+\usepackage[left=3cm,right=1.5cm,top=2cm,bottom=2cm]{geometry}
+
+% --- Межстрочный интервал 1.5 ---
+\usepackage{setspace}
+\onehalfspacing
+
+% --- Пакеты для вставки картинок, ссылок и кода ---
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage[outputdir=build]{minted} % Красивая подсветка кода (требует Python)
+\usemintedstyle{vs} % Стиль подсветки Visual Studio
+
+% --- Настройка библиографии (ГОСТ) ---
+\usepackage[backend=biber,style=gost-numeric,sorting=none]{biblatex}
+\addbibresource{references.bib}
+
+\begin{document}
+
+% ================= ТИТУЛЬНЫЙ ЛИСТ =================
+\begin{titlepage}
+    \centering
+    \footnotesize
+    МИНИСТЕРСТВО НАУКИ И ВЫСШЕГО ОБРАЗОВАНИЯ РОССИЙСКОЙ ФЕДЕРАЦИИ\\
+    ФЕДЕРАЛЬНОЕ ГОСУДАРСТВЕННОЕ БЮДЖЕТНОЕ ОБРАЗОВАТЕЛЬНОЕ УЧРЕЖДЕНИЕ\\
+    ВЫСШЕГО ОБРАЗОВАНИЯ\\
+    \textbf{«МИРЭА – Российский технологический университет»}\\
+    \vspace{0.5cm}
+    Институт информационных технологий\\
+    Кафедра инструментального и прикладного программного обеспечения\\
+
+    \vspace{3cm}
+    \Large \textbf{ОТЧЕТ ПО ПРАКТИЧЕСКОЙ РАБОТЕ №7}\\
+    \normalsize по дисциплине «Инструментальные средства разработки ПО»\\
+    \vspace{1cm}
+    \Large \textbf{Тема: Интеграция средств автоматизированного документирования}\\
+
+    \vspace{4cm}
+    \begin{flushright}
+        \begin{minipage}{0.4\textwidth}
+            \flushright
+            Выполнил студент:\\
+            Котельников Д.В.\\
+            Группа ИКБО-31-24\\
+            \\
+            Проверил:\\
+            Шутов К.И.
+        \end{minipage}
+    \end{flushright}
+
+    \vfill
+    Москва 2025
+\end{titlepage}
+
+% ================= СОДЕРЖАНИЕ =================
+\tableofcontents
+\newpage
+
+% ================= ВВЕДЕНИЕ =================
+\section{Введение}
+Целью данной работы является изучение инструментов документирования кода (Doxygen) и издательской системы \LaTeX{}. В качестве объекта исследования используется модуль \texttt{qt.py}, реализующий работу с базой данных SQLite.
+
+% ================= ПОДКЛЮЧЕНИЕ ВАШЕЙ ИНСТРУКЦИИ =================
+\input{manual}
+
+% ================= АНАЛИЗ КОДА =================
+\section{Анализ программного кода}
+Для выполнения работы был проанализирован основной файл курсовой работы (см. Листинг 1).
+
+\begin{listing}[H]
+\caption{Код из qt.py}
+\inputminted[firstline=1, lastline=314, linenos]{python}{qt.py}
+\end{listing}
+
+% ================= ЗАКЛЮЧЕНИЕ =================
+\section{Заключение}
+В ходе практической работы была сформирована документация API и сверстан отчет в системе \LaTeX{}.
+
+% ================= СПИСОК ЛИТЕРАТУРЫ =================
+\printbibliography[heading=bibintoc, title={Список использованных источников}]
+
+\end{document}
